@@ -1,0 +1,8 @@
+{
+  "betToken": "0x69E32f138eCF6ca84E155165DBa6649f000fA707",
+  "lotteryTicket": "0x7c48c41366839aAe7FA32683F9bbd842f8FFAA3a",
+  "bettingPlatform": "0xEA13b95A315B77AD0E5983DBE8b3E82582a0692F",
+  "orderBook": "0x9d8592C00C95504e72A3FFbFDf759A58251442A9",
+  "network": "ganache",
+  "chainId": 1337
+}

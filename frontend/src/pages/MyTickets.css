@@ -1,0 +1,200 @@
+.my-tickets-container {
+  min-height: 100vh;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  padding: 40px 20px;
+}
+
+.my-tickets-card {
+  max-width: 900px;
+  margin: 0 auto;
+  background: white;
+  padding: 30px;
+  border-radius: 10px;
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+}
+
+.back-btn {
+  background: #ddd;
+  border: none;
+  padding: 8px 15px;
+  border-radius: 5px;
+  cursor: pointer;
+  margin-bottom: 20px;
+  font-size: 14px;
+}
+
+.back-btn:hover {
+  background: #ccc;
+}
+
+.my-tickets-card h1 {
+  margin-top: 0;
+  color: #333;
+}
+
+.warning, .empty-state {
+  text-align: center;
+  padding: 40px;
+  color: #666;
+  font-size: 18px;
+}
+
+.tickets-list {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.ticket-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 20px;
+  border: 2px solid #ddd;
+  border-radius: 5px;
+  background: #f9f9f9;
+}
+
+.ticket-info {
+  flex: 1;
+}
+
+.ticket-info h3 {
+  margin-top: 0;
+  color: #333;
+}
+
+.ticket-info p {
+  margin: 5px 0;
+  color: #666;
+  font-size: 14px;
+}
+
+.order-status {
+  color: #51cf66;
+  font-weight: 500;
+}
+
+.ticket-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.sell-form {
+  display: flex;
+  gap: 10px;
+}
+
+.price-input {
+  padding: 8px;
+  border: 1px solid #ddd;
+  border-radius: 5px;
+  width: 120px;
+}
+
+.sell-btn, .cancel-order-btn {
+  padding: 8px 15px;
+  border: none;
+  border-radius: 5px;
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.sell-btn {
+  background: #667eea;
+  color: white;
+}
+
+.sell-btn:hover:not(:disabled) {
+  background: #5568d3;
+}
+
+.cancel-order-btn {
+  background: #ff6b6b;
+  color: white;
+}
+
+.cancel-order-btn:hover:not(:disabled) {
+  background: #ee5a5a;
+}
+
+.sell-btn:disabled, .cancel-order-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 1000;
+}
+
+.modal {
+  background: white;
+  padding: 30px;
+  border-radius: 10px;
+  max-width: 400px;
+  width: 90%;
+}
+
+.modal h3 {
+  margin-top: 0;
+  color: #333;
+}
+
+.modal-input {
+  width: 100%;
+  padding: 10px;
+  border: 1px solid #ddd;
+  border-radius: 5px;
+  margin: 15px 0;
+  box-sizing: border-box;
+}
+
+.modal-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 20px;
+}
+
+.modal .cancel-btn, .modal .confirm-btn {
+  flex: 1;
+  padding: 10px;
+  border: none;
+  border-radius: 5px;
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.modal .cancel-btn {
+  background: #ddd;
+  color: #333;
+}
+
+.modal .cancel-btn:hover {
+  background: #ccc;
+}
+
+.modal .confirm-btn {
+  background: #667eea;
+  color: white;
+}
+
+.modal .confirm-btn:hover:not(:disabled) {
+  background: #5568d3;
+}
+
+.modal .confirm-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+
