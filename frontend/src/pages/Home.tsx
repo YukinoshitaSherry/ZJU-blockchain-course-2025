@@ -24,6 +24,7 @@ const Home: React.FC = () => {
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState<boolean>(false);
   const [filter, setFilter] = useState<'all' | 'active' | 'ended'>('all');
+  const [connecting, setConnecting] = useState<boolean>(false);
 
   useEffect(() => {
     initCheckAccounts();
@@ -57,30 +58,39 @@ const Home: React.FC = () => {
       return;
     }
 
+    // 如果已经有账户连接，不需要再次连接
+    if (account) {
+      return;
+    }
+
+    // 如果正在连接中，防止重复点击
+    if (connecting) {
+      return;
+    }
+
+    setConnecting(true);
+
     try {
-      // 先切换到Ganache网络（参考demo的最佳实践）
-      const chainId = await ethereum.request({ method: 'eth_chainId' });
-      if (chainId !== GanacheTestChainId) {
+      // 如果当前小狐狸不在本地链上，切换Metamask到本地测试链
+      if (ethereum.chainId !== GanacheTestChainId) {
+        const chain = {
+          chainId: GanacheTestChainId, // Chain-ID
+          chainName: GanacheTestChainName, // Chain-Name
+          rpcUrls: [GanacheTestChainRpcUrl], // RPC-URL
+        };
+
         try {
+          // 尝试切换到本地网络
           await ethereum.request({
-            method: 'wallet_switchEthereumChain',
-            params: [{ chainId: GanacheTestChainId }],
+            method: "wallet_switchEthereumChain",
+            params: [{ chainId: chain.chainId }]
           });
         } catch (switchError: any) {
-          // 如果网络不存在，添加网络
+          // 如果本地网络没有添加到Metamask中，添加该网络
           if (switchError.code === 4902) {
             await ethereum.request({
               method: 'wallet_addEthereumChain',
-              params: [{
-                chainId: GanacheTestChainId,
-                chainName: GanacheTestChainName,
-                rpcUrls: [GanacheTestChainRpcUrl],
-                nativeCurrency: {
-                  name: 'ETH',
-                  symbol: 'ETH',
-                  decimals: 18,
-                },
-              }],
+              params: [chain]
             });
           } else {
             throw switchError;
@@ -88,17 +98,24 @@ const Home: React.FC = () => {
         }
       }
 
-      // 网络切换成功后，再请求连接账户
+      // 小狐狸成功切换网络了，接下来让小狐狸请求用户的授权
       await ethereum.request({ method: 'eth_requestAccounts' });
-      const accounts = await web3.eth.getAccounts();
+      // 获取小狐狸拿到的授权用户列表
+      const accounts = await ethereum.request({ method: 'eth_accounts' });
+      // 如果用户存在，展示其account，否则显示错误信息
       if (accounts && accounts.length > 0) {
-        setAccount(accounts[0]);
+        setAccount(accounts[0] || 'Not able to get accounts');
         // 重新加载余额
         getAccountBalance();
       }
     } catch (error: any) {
-      alert('连接钱包失败: ' + (error.message || '未知错误'));
+      // 忽略"already pending"错误，因为这通常意味着连接正在进行中
+      if (!error.message?.includes('already pending')) {
+        alert('连接钱包失败: ' + (error.message || '未知错误'));
+      }
       console.error('Wallet connection error:', error);
+    } finally {
+      setConnecting(false);
     }
   };
 
