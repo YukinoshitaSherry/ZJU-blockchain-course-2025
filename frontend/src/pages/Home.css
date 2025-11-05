@@ -56,7 +56,23 @@
   background: #40c057;
 }
 
-.connect-btn, .create-btn {
+.switch-account-btn {
+  background: #ff6b6b;
+  color: white;
+  border: none;
+  padding: 5px 12px;
+  border-radius: 5px;
+  cursor: pointer;
+  font-size: 12px;
+  transition: background 0.3s;
+}
+
+.switch-account-btn:hover {
+  background: #ee5a52;
+}
+
+.connect-btn,
+.create-btn {
   background: #667eea;
   color: white;
   border: none;
@@ -67,7 +83,8 @@
   transition: background 0.3s;
 }
 
-.connect-btn:hover, .create-btn:hover {
+.connect-btn:hover,
+.create-btn:hover {
   background: #5568d3;
 }
 
@@ -174,7 +191,8 @@
   background: #5568d3;
 }
 
-.loading, .empty-state {
+.loading,
+.empty-state {
   text-align: center;
   color: white;
   font-size: 18px;
@@ -202,4 +220,3 @@
 .bottom-nav button:hover {
   transform: scale(1.05);
 }
-

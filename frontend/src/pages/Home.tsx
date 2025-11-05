@@ -29,6 +29,42 @@ const Home: React.FC = () => {
   useEffect(() => {
     initCheckAccounts();
     loadProjects();
+    
+    // 监听账户变化（当用户在MetaMask中切换账户时）
+    const { ethereum } = window as any;
+    if (ethereum && ethereum.isMetaMask) {
+      const handleAccountsChanged = (accounts: string[]) => {
+        if (accounts.length > 0) {
+          setAccount(accounts[0]);
+          // 账户变化后重新获取余额
+          setTimeout(() => {
+            getAccountBalance();
+          }, 100);
+        } else {
+          setAccount('');
+          setAccountBalance('0');
+          setTokenBalance('0');
+        }
+      };
+
+      // 监听账户变化事件
+      ethereum.on('accountsChanged', handleAccountsChanged);
+      
+      // 监听网络变化事件
+      const handleChainChanged = () => {
+        // 网络变化时重新加载页面
+        window.location.reload();
+      };
+      ethereum.on('chainChanged', handleChainChanged);
+
+      // 清理函数
+      return () => {
+        if (ethereum.removeListener) {
+          ethereum.removeListener('accountsChanged', handleAccountsChanged);
+          ethereum.removeListener('chainChanged', handleChainChanged);
+        }
+      };
+    }
   }, []);
 
   useEffect(() => {
@@ -51,19 +87,78 @@ const Home: React.FC = () => {
     }
   };
 
+  // 检查并配置Ganache网络
+  const setupGanacheNetwork = async (ethereum: any): Promise<boolean> => {
+    const currentChainId = ethereum.chainId;
+    
+    if (currentChainId === GanacheTestChainId) {
+      return true; // 已经在正确的网络
+    }
+
+    const networkConfig = {
+      chainId: GanacheTestChainId,
+      chainName: GanacheTestChainName,
+      rpcUrls: [GanacheTestChainRpcUrl],
+      nativeCurrency: {
+        name: 'Ethereum',
+        symbol: 'ETH',
+        decimals: 18,
+      },
+    };
+
+    try {
+      // 尝试切换到Ganache网络
+      await ethereum.request({
+        method: 'wallet_switchEthereumChain',
+        params: [{ chainId: GanacheTestChainId }],
+      });
+      return true;
+    } catch (switchErr: any) {
+      // 网络不存在，需要添加
+      if (switchErr.code === 4902) {
+        try {
+          await ethereum.request({
+            method: 'wallet_addEthereumChain',
+            params: [networkConfig],
+          });
+          return true;
+        } catch (addErr: any) {
+          throw new Error('无法添加Ganache网络: ' + addErr.message);
+        }
+      }
+      throw switchErr;
+    }
+  };
+
+  // 请求账户授权
+  const requestAccountAccess = async (ethereum: any): Promise<string | null> => {
+    try {
+      await ethereum.request({ method: 'eth_requestAccounts' });
+      const authorizedAccounts = await ethereum.request({ method: 'eth_accounts' });
+      
+      if (authorizedAccounts && authorizedAccounts.length > 0) {
+        return authorizedAccounts[0];
+      }
+      return null;
+    } catch (err: any) {
+      // 如果是pending请求，不抛出错误
+      if (err.message?.includes('already pending')) {
+        return null;
+      }
+      throw err;
+    }
+  };
+
   const connectWallet = async () => {
-    const { ethereum } = window as any;
-    if (!ethereum || !ethereum.isMetaMask) {
-      alert('请安装MetaMask钱包');
+    const windowEthereum = (window as any).ethereum;
+    
+    // 验证MetaMask是否可用
+    if (!windowEthereum || !windowEthereum.isMetaMask) {
+      alert('请先安装并启用MetaMask扩展');
       return;
     }
 
-    // 如果已经有账户连接，不需要再次连接
-    if (account) {
-      return;
-    }
-
-    // 如果正在连接中，防止重复点击
+    // 如果正在连接，不重复执行
     if (connecting) {
       return;
     }
@@ -71,49 +166,116 @@ const Home: React.FC = () => {
     setConnecting(true);
 
     try {
-      // 如果当前小狐狸不在本地链上，切换Metamask到本地测试链
-      if (ethereum.chainId !== GanacheTestChainId) {
-        const chain = {
-          chainId: GanacheTestChainId, // Chain-ID
-          chainName: GanacheTestChainName, // Chain-Name
-          rpcUrls: [GanacheTestChainRpcUrl], // RPC-URL
-        };
-
-        try {
-          // 尝试切换到本地网络
-          await ethereum.request({
-            method: "wallet_switchEthereumChain",
-            params: [{ chainId: chain.chainId }]
-          });
-        } catch (switchError: any) {
-          // 如果本地网络没有添加到Metamask中，添加该网络
-          if (switchError.code === 4902) {
-            await ethereum.request({
-              method: 'wallet_addEthereumChain',
-              params: [chain]
-            });
-          } else {
-            throw switchError;
-          }
-        }
+      // 步骤1: 配置网络
+      const networkReady = await setupGanacheNetwork(windowEthereum);
+      if (!networkReady) {
+        throw new Error('网络配置失败');
       }
 
-      // 小狐狸成功切换网络了，接下来让小狐狸请求用户的授权
-      await ethereum.request({ method: 'eth_requestAccounts' });
-      // 获取小狐狸拿到的授权用户列表
-      const accounts = await ethereum.request({ method: 'eth_accounts' });
-      // 如果用户存在，展示其account，否则显示错误信息
+      // 步骤2: 请求账户访问权限（允许用户选择账户）
+      // 使用 eth_requestAccounts 会弹出账户选择窗口，让用户选择要连接的账户
+      // 如果已经连接过，这个调用会允许用户切换账户
+      await windowEthereum.request({ method: 'eth_requestAccounts' });
+      const authorizedAccounts = await windowEthereum.request({ method: 'eth_accounts' });
+      
+      if (authorizedAccounts && authorizedAccounts.length > 0) {
+        const selectedAccount = authorizedAccounts[0];
+        setAccount(selectedAccount);
+        await getAccountBalance();
+        console.log('已连接到账户:', selectedAccount);
+      } else {
+        console.log('未选择账户');
+      }
+    } catch (err: any) {
+      const errorMsg = err.message || '连接失败';
+      if (!errorMsg.includes('already pending') && !errorMsg.includes('User rejected')) {
+        alert('钱包连接失败: ' + errorMsg);
+      }
+      console.error('钱包连接错误详情:', err);
+    } finally {
+      setConnecting(false);
+    }
+  };
+
+  // 断开连接或切换账户
+  const disconnectWallet = () => {
+    setAccount('');
+    setAccountBalance('0');
+    setTokenBalance('0');
+  };
+
+  // 切换账户（重新连接）
+  const switchAccount = async () => {
+    const windowEthereum = (window as any).ethereum;
+    
+    if (!windowEthereum || !windowEthereum.isMetaMask) {
+      alert('请先安装并启用MetaMask扩展');
+      return;
+    }
+
+    if (connecting) {
+      return;
+    }
+
+    setConnecting(true);
+
+    try {
+      // 配置网络
+      const networkReady = await setupGanacheNetwork(windowEthereum);
+      if (!networkReady) {
+        throw new Error('网络配置失败');
+      }
+
+      // 先清除当前账户状态
+      const oldAccount = account;
+      disconnectWallet();
+      
+      // 使用 wallet_requestPermissions 来重新请求权限，这会弹出MetaMask窗口
+      // 如果用户有多个账户，MetaMask会显示账户选择界面
+      try {
+        await windowEthereum.request({
+          method: 'wallet_requestPermissions',
+          params: [{ eth_accounts: {} }]
+        });
+      } catch (permErr: any) {
+        // 如果 wallet_requestPermissions 不支持，使用 eth_requestAccounts
+        // 但 eth_requestAccounts 在已授权时可能不会弹出窗口
+        console.log('wallet_requestPermissions 不支持，使用 eth_requestAccounts');
+      }
+      
+      // 重新请求账户访问权限
+      // 这会触发MetaMask弹出，让用户选择账户
+      await windowEthereum.request({ 
+        method: 'eth_requestAccounts' 
+      });
+      
+      // 获取当前MetaMask中选中的账户
+      const accounts = await windowEthereum.request({ 
+        method: 'eth_accounts' 
+      });
+      
       if (accounts && accounts.length > 0) {
-        setAccount(accounts[0] || 'Not able to get accounts');
-        // 重新加载余额
-        getAccountBalance();
+        const selectedAccount = accounts[0];
+        
+        // 检查是否真的切换了账户
+        if (selectedAccount === oldAccount) {
+          alert('账户未切换！\n\n提示：如果MetaMask没有弹出账户选择窗口，请：\n1. 在MetaMask中手动切换到"Imported Account 1"\n2. 刷新页面（F5）\n3. 前端会自动检测到账户变化');
+          setConnecting(false);
+          return;
+        }
+        
+        setAccount(selectedAccount);
+        await getAccountBalance();
+        console.log('已切换到账户:', selectedAccount);
+      } else {
+        alert('未检测到账户，请确保MetaMask已连接账户。');
       }
-    } catch (error: any) {
-      // 忽略"already pending"错误，因为这通常意味着连接正在进行中
-      if (!error.message?.includes('already pending')) {
-        alert('连接钱包失败: ' + (error.message || '未知错误'));
+    } catch (err: any) {
+      const errorMsg = err.message || '切换账户失败';
+      if (!errorMsg.includes('User rejected')) {
+        alert('切换账户失败: ' + errorMsg + '\n\n提示：如果MetaMask没有弹出，请直接在MetaMask中切换到"Imported Account 1"，然后刷新页面。');
       }
-      console.error('Wallet connection error:', error);
+      console.error('切换账户错误详情:', err);
     } finally {
       setConnecting(false);
     }
@@ -145,9 +307,12 @@ const Home: React.FC = () => {
     }
 
     try {
+      // 空投是免费的（交易金额为0），但需要Gas费（由Ganache免费提供）
+      // 这与demo实现一致：myERC20Contract.methods.airdrop().send({ from: account })
       await betTokenContract.methods.airdrop().send({
-        from: account,
-        gas: 3000000
+        from: account
+        // 注意：不设置value，默认为0 ETH
+        // Gas费是必需的，所有区块链交易都需要Gas费（约0.0075 ETH，Ganache免费提供）
       });
       alert('领取成功！');
       getAccountBalance();
@@ -213,6 +378,9 @@ const Home: React.FC = () => {
               <span>积分: {parseFloat(tokenBalance).toFixed(2)} BET</span>
               <button onClick={handleClaimAirdrop} className="airdrop-btn" title="领取ERC20积分">
                 领取积分
+              </button>
+              <button onClick={switchAccount} className="switch-account-btn" title="切换账户">
+                切换账户
               </button>
             </div>
           ) : (
