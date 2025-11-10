@@ -341,6 +341,13 @@ const Home: React.FC = () => {
       console.log("开始领取积分，账户:", account);
       console.log("betTokenContract地址:", betTokenContract.options.address);
 
+      const currentBalance = await betTokenContract.methods.balanceOf(account).call();
+      console.log("当前积分余额:", currentBalance);
+      if (web3.utils.toBN(currentBalance).gt(web3.utils.toBN(0))) {
+        alert("您已经领取过空投了");
+        return;
+      }
+
       // 空投是免费的（交易金额为0），但需要Gas费（由Ganache免费提供）
       // 这与demo实现一致：myERC20Contract.methods.airdrop().send({ from: account })
       await betTokenContract.methods.airdrop().send({
@@ -363,6 +370,10 @@ const Home: React.FC = () => {
           errorMessage = error.reason;
         } else if (error.data && error.data.message) {
           errorMessage = error.data.message;
+        } else if (error.data && error.data.data && error.data.data.message) {
+          errorMessage = error.data.data.message;
+        } else if (error.error && error.error.data && error.error.data.message) {
+          errorMessage = error.error.data.message;
         } else {
           // 如果error是对象但没有message，尝试转换为字符串
           try {

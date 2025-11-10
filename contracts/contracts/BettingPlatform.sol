@@ -205,6 +205,42 @@ contract BettingPlatform {
     }
     
     /**
+     * @dev 提前结算项目并分发奖金（仅创建者可调用，用于测试和演示）
+     * @param projectId 项目ID
+     * @param winningOption 获胜选项索引
+     * @notice 此函数允许创建者在截止时间之前结算项目，用于测试和演示
+     *         与 settleProject 不冲突，两个函数可以共存
+     */
+    function settleProjectEarly(uint256 projectId, uint256 winningOption) external onlyCreator(projectId) {
+        BettingProject storage project = projects[projectId];
+        require(!project.isSettled, "Project already settled");
+        // 注意：这里不检查截止时间，允许提前结算
+        require(winningOption < project.options.length, "Invalid winning option");
+        
+        project.isSettled = true;
+        project.winningOption = winningOption;
+        
+        address[] memory winners = optionHolders[projectId][winningOption];
+        uint256 winnerCount = winners.length;
+        
+        if (winnerCount > 0 && project.prizePool > 0) {
+            uint256 prizePerWinner = project.prizePool / winnerCount;
+            
+            if (useERC20Payment) {
+                for (uint256 i = 0; i < winnerCount; i++) {
+                    require(betToken.transfer(winners[i], prizePerWinner), "Prize transfer failed");
+                }
+            } else {
+                for (uint256 i = 0; i < winnerCount; i++) {
+                    payable(winners[i]).transfer(prizePerWinner);
+                }
+            }
+        }
+        
+        emit ProjectSettled(projectId, winningOption, winnerCount);
+    }
+    
+    /**
      * @dev 获取项目信息
      */
     function getProject(uint256 projectId) external view returns (BettingProject memory) {

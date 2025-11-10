@@ -70,6 +70,11 @@
   font-size: 14px;
 }
 
+.ticket-settled {
+  color: #ff6b6b;
+  font-weight: 600;
+}
+
 .order-status {
   color: #51cf66;
   font-weight: 500;

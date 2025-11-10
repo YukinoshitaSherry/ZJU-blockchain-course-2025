@@ -20,6 +20,7 @@ interface Order {
   tokenId: number;
   price: string;
   isActive: boolean;
+  optionIndex: number;
 }
 
 const ProjectDetail: React.FC = () => {
@@ -28,7 +29,8 @@ const ProjectDetail: React.FC = () => {
   const [project, setProject] = useState<Project | null>(null);
   const [selectedOption, setSelectedOption] = useState<number>(0);
   const [optionCounts, setOptionCounts] = useState<number[]>([]);
-  const [orders, setOrders] = useState<Order[]>([]);
+  const [ordersByOption, setOrdersByOption] = useState<Record<number, Order[]>>({});
+  const [bestPriceByOption, setBestPriceByOption] = useState<Record<number, string>>({});
   const [loading, setLoading] = useState<boolean>(false);
   const [showOrderBook, setShowOrderBook] = useState<boolean>(false);
 
@@ -97,24 +99,45 @@ const ProjectDetail: React.FC = () => {
   const loadOrderBook = async () => {
     if (!project) return;
     try {
-      const allOrders: Order[] = [];
+      const grouped: Record<number, Order[]> = {};
+      const bestPriceMap: Record<number, string> = {};
+
       for (let i = 0; i < project.options.length; i++) {
-        const [orderIds, prices] = await orderBookContract.methods
+        grouped[i] = [];
+        const [orderIds] = await orderBookContract.methods
           .getOrderBook(project.projectId, i)
           .call();
-        
-        for (let j = 0; j < orderIds.length; j++) {
-          const order = await orderBookContract.methods.getOrder(orderIds[j]).call();
-          allOrders.push({
+
+        const orderPromises = orderIds.map(async (orderId: string) => {
+          const order = await orderBookContract.methods.getOrder(orderId).call();
+          return {
             orderId: parseInt(order.orderId),
             seller: order.seller,
             tokenId: parseInt(order.tokenId),
             price: order.price,
             isActive: order.isActive,
-          });
+            optionIndex: parseInt(order.optionIndex),
+          } as Order;
+        });
+
+        const orders = (await Promise.all(orderPromises)).filter((order) => order.isActive);
+
+        grouped[i] = orders.sort((a, b) => {
+          const priceA = BigInt(a.price);
+          const priceB = BigInt(b.price);
+          if (priceA === priceB) {
+            return a.orderId - b.orderId;
+          }
+          return priceA < priceB ? -1 : 1;
+        });
+
+        if (grouped[i].length > 0) {
+          bestPriceMap[i] = grouped[i][0].price;
         }
       }
-      setOrders(allOrders);
+
+      setOrdersByOption(grouped);
+      setBestPriceByOption(bestPriceMap);
     } catch (error) {
       console.error('Error loading order book:', error);
     }
@@ -186,6 +209,39 @@ const ProjectDetail: React.FC = () => {
     }
   };
 
+  const handleBuyBestPrice = async (optionIndex: number) => {
+    if (!account || !project) {
+      alert('请先连接钱包');
+      return;
+    }
+
+    const optionOrders = ordersByOption[optionIndex];
+    if (!optionOrders || optionOrders.length === 0 || !bestPriceByOption[optionIndex]) {
+      alert('当前选项没有挂单');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      await orderBookContract.methods
+        .buyAtBestPrice(project.projectId, optionIndex)
+        .send({
+          from: account,
+          value: bestPriceByOption[optionIndex],
+          gas: 3000000,
+        });
+
+      alert('按最优价格购买成功！');
+      loadOrderBook();
+      loadOptionCounts();
+    } catch (error: any) {
+      alert('购买失败: ' + (error?.message || '未知错误'));
+      console.error(error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleSettle = async () => {
     if (!account || !project) return;
 
@@ -216,6 +272,46 @@ const ProjectDetail: React.FC = () => {
       loadProject();
     } catch (error: any) {
       alert('结算失败: ' + (error.message || '未知错误'));
+      console.error(error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSettleEarly = async () => {
+    if (!account || !project) return;
+
+    if (account.toLowerCase() !== project.creator.toLowerCase()) {
+      alert('只有创建者可以提前结算项目');
+      return;
+    }
+
+    if (!window.confirm('确定要提前结算项目吗？\n\n注意：此功能允许在截止时间之前结算，用于测试和演示。')) {
+      return;
+    }
+
+    const winningOptionStr = prompt('请输入获胜选项的索引（从0开始）:');
+    if (winningOptionStr === null) return;
+
+    const winningOption = parseInt(winningOptionStr);
+    if (isNaN(winningOption) || winningOption < 0 || winningOption >= project.options.length) {
+      alert('无效的选项索引');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      await bettingPlatformContract.methods
+        .settleProjectEarly(project.projectId, winningOption)
+        .send({
+          from: account,
+          gas: 3000000
+        });
+
+      alert('提前结算成功！');
+      loadProject();
+    } catch (error: any) {
+      alert('提前结算失败: ' + (error.message || '未知错误'));
       console.error(error);
     } finally {
       setLoading(false);
@@ -300,9 +396,17 @@ const ProjectDetail: React.FC = () => {
             {showOrderBook ? '隐藏' : '显示'}订单簿
           </button>
 
+          {/* 正常结算按钮：项目已截止时显示 */}
           {isCreator && !project.isSettled && project.deadline * 1000 <= Date.now() && (
             <button onClick={handleSettle} className="settle-btn">
               结算项目
+            </button>
+          )}
+
+          {/* 提前结算按钮：项目未截止时显示（用于测试和演示） */}
+          {isCreator && !project.isSettled && project.deadline * 1000 > Date.now() && (
+            <button onClick={handleSettleEarly} className="settle-btn" style={{ backgroundColor: '#ff9800' }}>
+              提前结算（测试）
             </button>
           )}
         </div>
@@ -310,30 +414,63 @@ const ProjectDetail: React.FC = () => {
         {showOrderBook && (
           <div className="orderbook-section">
             <h3>订单簿</h3>
-            {orders.length === 0 ? (
-              <p className="no-orders">暂无订单</p>
-            ) : (
-              <div className="orders-list">
-                {orders.map((order) => (
-                  <div key={order.orderId} className="order-item">
-                    <div className="order-info">
-                      <span>Token #{order.tokenId}</span>
-                      <span>价格: {web3.utils.fromWei(order.price, 'ether')} ETH</span>
-                      <span>卖家: {order.seller.slice(0, 6)}...{order.seller.slice(-4)}</span>
-                    </div>
-                    {account && order.seller.toLowerCase() !== account.toLowerCase() && (
-                      <button
-                        onClick={() => handleBuyFromOrder(order.orderId, order.price)}
-                        disabled={loading}
-                        className="buy-order-btn"
-                      >
-                        购买
-                      </button>
+            {project.options.map((option, index) => {
+              const optionOrders = ordersByOption[index] || [];
+              const hasOrders = optionOrders.length > 0;
+              return (
+                <div key={index} className="orderbook-option">
+                  <div className="orderbook-option-header">
+                    <h4>
+                      选项 {index}: {option}
+                    </h4>
+                    {hasOrders && (
+                      <div className="orderbook-option-meta">
+                        <span>
+                          最优价格: {web3.utils.fromWei(bestPriceByOption[index], 'ether')} ETH
+                        </span>
+                        {account && (
+                          <button
+                            onClick={() => handleBuyBestPrice(index)}
+                            disabled={loading}
+                            className="buy-best-btn"
+                          >
+                            {loading ? '处理中...' : '按最优价格购买'}
+                          </button>
+                        )}
+                      </div>
                     )}
                   </div>
-                ))}
-              </div>
-            )}
+                  {!hasOrders ? (
+                    <p className="no-orders">该选项暂无挂单</p>
+                  ) : (
+                    <div className="orders-list">
+                      {optionOrders.map((order, idx) => (
+                        <div
+                          key={order.orderId}
+                          className={`order-item ${idx === 0 ? 'best-order' : ''}`}
+                        >
+                          <div className="order-info">
+                            <span>订单 #{order.orderId}</span>
+                            <span>Token #{order.tokenId}</span>
+                            <span>价格: {web3.utils.fromWei(order.price, 'ether')} ETH</span>
+                            <span>卖家: {order.seller.slice(0, 6)}...{order.seller.slice(-4)}</span>
+                          </div>
+                          {account && order.seller.toLowerCase() !== account.toLowerCase() && (
+                            <button
+                              onClick={() => handleBuyFromOrder(order.orderId, order.price)}
+                              disabled={loading}
+                              className="buy-order-btn"
+                            >
+                              {idx === 0 ? '购买(最优)' : '购买'}
+                            </button>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
         )}
       </div>

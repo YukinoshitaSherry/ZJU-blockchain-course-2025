@@ -115,6 +115,16 @@ const LotteryTicketABI = [
   },
   {
     "constant": true,
+    "inputs": [
+      {"name": "owner", "type": "address"},
+      {"name": "operator", "type": "address"}
+    ],
+    "name": "isApprovedForAll",
+    "outputs": [{"name": "", "type": "bool"}],
+    "type": "function"
+  },
+  {
+    "constant": true,
     "inputs": [{"name": "tokenId", "type": "uint256"}],
     "name": "getTicketInfo",
     "outputs": [{
@@ -155,6 +165,16 @@ const LotteryTicketABI = [
     "name": "approve",
     "outputs": [],
     "type": "function"
+  },
+  {
+    "constant": false,
+    "inputs": [
+      {"name": "operator", "type": "address"},
+      {"name": "approved", "type": "bool"}
+    ],
+    "name": "setApprovalForAll",
+    "outputs": [],
+    "type": "function"
   }
 ];
 
@@ -191,6 +211,17 @@ const BettingPlatformABI = [
       {"name": "winningOption", "type": "uint256"}
     ],
     "name": "settleProject",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "constant": false,
+    "inputs": [
+      {"name": "projectId", "type": "uint256"},
+      {"name": "winningOption", "type": "uint256"}
+    ],
+    "name": "settleProjectEarly",
     "outputs": [],
     "stateMutability": "nonpayable",
     "type": "function"
@@ -315,6 +346,13 @@ const OrderBookABI = [
       {"name": "activeOrderIds", "type": "uint256[]"},
       {"name": "prices", "type": "uint256[]"}
     ],
+    "type": "function"
+  },
+  {
+    "constant": true,
+    "inputs": [{"name": "tokenId", "type": "uint256"}],
+    "name": "tokenToOrder",
+    "outputs": [{"name": "", "type": "uint256"}],
     "type": "function"
   },
   {

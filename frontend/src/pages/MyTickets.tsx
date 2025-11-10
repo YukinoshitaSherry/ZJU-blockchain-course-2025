@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { web3, lotteryTicketContract, orderBookContract } from '../utils/contracts';
+import { web3, lotteryTicketContract, orderBookContract, bettingPlatformContract, addresses } from '../utils/contracts';
 import './MyTickets.css';
 
 interface Ticket {
@@ -8,6 +8,10 @@ interface Ticket {
   optionIndex: number;
   purchasePrice: string;
   purchaseTime: number;
+  projectTitle?: string;
+  optionName?: string;
+  projectSettled: boolean;
+  winningOption: number;
 }
 
 interface Order {
@@ -24,6 +28,7 @@ const MyTickets: React.FC = () => {
   const [sellPrice, setSellPrice] = useState<string>('1');
   const [loading, setLoading] = useState<boolean>(false);
   const [orders, setOrders] = useState<Order[]>([]);
+  const [hasApprovalForAll, setHasApprovalForAll] = useState<boolean>(false);
 
   useEffect(() => {
     initCheckAccounts();
@@ -31,8 +36,38 @@ const MyTickets: React.FC = () => {
 
   useEffect(() => {
     if (account) {
+      refreshApprovalStatus();
       loadTickets();
       loadMyOrders();
+    }
+  }, [account]);
+
+  // 添加监听事件，当购买彩票后刷新
+  useEffect(() => {
+    const { ethereum } = window as any;
+    if (ethereum && ethereum.isMetaMask) {
+      // 监听区块链事件，当有新的交易时刷新
+      const handleChainChanged = () => {
+        if (account) {
+          loadTickets();
+        }
+      };
+      
+      ethereum.on('chainChanged', handleChainChanged);
+      
+      // 定期刷新（每5秒检查一次）
+      const refreshInterval = setInterval(() => {
+        if (account) {
+          loadTickets();
+        }
+      }, 5000);
+      
+      return () => {
+        if (ethereum.removeListener) {
+          ethereum.removeListener('chainChanged', handleChainChanged);
+        }
+        clearInterval(refreshInterval);
+      };
     }
   }, [account]);
 
@@ -53,21 +88,71 @@ const MyTickets: React.FC = () => {
   const loadTickets = async () => {
     if (!account) return;
     try {
+      console.log('加载彩票，账户:', account);
+      console.log('lotteryTicketContract地址:', lotteryTicketContract.options.address);
+      
       const tokenIds = await lotteryTicketContract.methods.getUserTickets(account).call();
+      console.log('获取到的Token IDs:', tokenIds);
+      
+      if (!tokenIds || tokenIds.length === 0) {
+        console.log('用户没有彩票，tokenIds为空数组');
+        setTickets([]);
+        return;
+      }
+      
+      // 预先缓存项目及选项信息，避免重复调用
+      const projectCache: Record<string, any> = {};
+      const optionCache: Record<string, string[]> = {};
+
       const ticketPromises = tokenIds.map(async (tokenId: string) => {
-        const info = await lotteryTicketContract.methods.getTicketInfo(tokenId).call();
-        return {
-          tokenId: parseInt(tokenId),
-          projectId: parseInt(info.projectId),
-          optionIndex: parseInt(info.optionIndex),
-          purchasePrice: info.purchasePrice,
-          purchaseTime: parseInt(info.purchaseTime),
-        };
+        try {
+          const info = await lotteryTicketContract.methods.getTicketInfo(tokenId).call();
+          const projectKey = info.projectId.toString();
+
+          if (!projectCache[projectKey]) {
+            projectCache[projectKey] = await bettingPlatformContract.methods
+              .getProject(info.projectId)
+              .call();
+          }
+
+          if (!optionCache[projectKey]) {
+            optionCache[projectKey] = await bettingPlatformContract.methods
+              .getProjectOptions(info.projectId)
+              .call();
+          }
+
+          const projectInfo = projectCache[projectKey];
+          const optionNames = optionCache[projectKey];
+          console.log(`Token ${tokenId} 信息:`, info);
+          return {
+            tokenId: parseInt(tokenId),
+            projectId: parseInt(info.projectId),
+            optionIndex: parseInt(info.optionIndex),
+            purchasePrice: info.purchasePrice,
+            purchaseTime: parseInt(info.purchaseTime),
+            projectTitle: projectInfo.title,
+            optionName: optionNames[parseInt(info.optionIndex)] ?? '',
+            projectSettled: projectInfo.isSettled,
+            winningOption: parseInt(projectInfo.winningOption?.toString?.() ?? projectInfo.winningOption),
+          };
+        } catch (err) {
+          console.error(`获取Token ${tokenId}信息失败:`, err);
+          return null;
+        }
       });
+      
       const loadedTickets = await Promise.all(ticketPromises);
-      setTickets(loadedTickets);
-    } catch (error) {
+      const validTickets = loadedTickets.filter(ticket => ticket !== null) as Ticket[];
+      console.log('加载的彩票列表:', validTickets);
+      setTickets(validTickets);
+    } catch (error: any) {
       console.error('Error loading tickets:', error);
+      console.error('错误详情:', error.message || error);
+      // 显示错误信息给用户
+      if (error.message) {
+        console.error('错误消息:', error.message);
+      }
+      setTickets([]);
     }
   };
 
@@ -97,6 +182,12 @@ const MyTickets: React.FC = () => {
       return;
     }
 
+    const ticket = tickets.find((t) => t.tokenId === selectedTicket);
+    if (ticket?.projectSettled) {
+      alert('该项目已结算，不能再出售。');
+      return;
+    }
+
     if (!sellPrice || parseFloat(sellPrice) <= 0) {
       alert('请输入有效的出售价格');
       return;
@@ -105,14 +196,27 @@ const MyTickets: React.FC = () => {
     setLoading(true);
     try {
       const priceInWei = web3.utils.toWei(sellPrice, 'ether');
-      
-      // 先授权
-      await lotteryTicketContract.methods
-        .approve((await import('../utils/contracts')).addresses.orderBook, selectedTicket)
-        .send({
-          from: account,
-          gas: 3000000
-        });
+
+      const existedOrderId = await orderBookContract.methods
+        .tokenToOrder(selectedTicket)
+        .call();
+      if (web3.utils.toBN(existedOrderId).gt(web3.utils.toBN(0))) {
+        alert('该彩票已经挂单，请先取消原有订单');
+        await loadMyOrders();
+        setLoading(false);
+        return;
+      }
+
+      if (!hasApprovalForAll) {
+        await lotteryTicketContract.methods
+          .setApprovalForAll(addresses.orderBook, true)
+          .send({
+            from: account,
+            gas: 3000000,
+          });
+        setHasApprovalForAll(true);
+        console.log('已为所有彩票开启订单簿合约授权');
+      }
 
       // 挂单
       await orderBookContract.methods
@@ -158,6 +262,17 @@ const MyTickets: React.FC = () => {
     return orders.find(order => order.tokenId === tokenId && order.isActive);
   };
 
+  const refreshApprovalStatus = async () => {
+    try {
+      const approved = await lotteryTicketContract.methods
+        .isApprovedForAll(account, addresses.orderBook)
+        .call();
+      setHasApprovalForAll(approved);
+    } catch (error) {
+      console.error('检查授权状态失败:', error);
+    }
+  };
+
   if (!account) {
     return (
       <div className="my-tickets-container">
@@ -175,8 +290,34 @@ const MyTickets: React.FC = () => {
 
         <h1>我的彩票</h1>
 
+        {/* 添加刷新按钮 */}
+        <div style={{ marginBottom: '10px' }}>
+          <button 
+            onClick={() => {
+              console.log('手动刷新彩票列表');
+              loadTickets();
+            }}
+            style={{
+              padding: '8px 16px',
+              backgroundColor: '#4CAF50',
+              color: 'white',
+              border: 'none',
+              borderRadius: '4px',
+              cursor: 'pointer'
+            }}
+          >
+            刷新列表
+          </button>
+        </div>
+
         {tickets.length === 0 ? (
-          <div className="empty-state">您还没有彩票</div>
+          <div className="empty-state">
+            您还没有彩票
+            <br />
+            <small style={{ color: '#666', fontSize: '12px', marginTop: '10px', display: 'block' }}>
+              提示：如果刚刚购买了彩票，请点击"刷新列表"按钮，或等待几秒自动刷新
+            </small>
+          </div>
         ) : (
           <div className="tickets-list">
             {tickets.map((ticket) => {
@@ -185,10 +326,15 @@ const MyTickets: React.FC = () => {
                 <div key={ticket.tokenId} className="ticket-item">
                   <div className="ticket-info">
                     <h3>彩票 #{ticket.tokenId}</h3>
-                    <p>项目ID: {ticket.projectId}</p>
-                    <p>选项索引: {ticket.optionIndex}</p>
+                    <p>项目ID: {ticket.projectId}{ticket.projectTitle ? ` - ${ticket.projectTitle}` : ''}</p>
+                    <p>选项索引: {ticket.optionIndex}{ticket.optionName ? ` (${ticket.optionName})` : ''}</p>
                     <p>购买价格: {web3.utils.fromWei(ticket.purchasePrice, 'ether')} ETH</p>
                     <p>购买时间: {new Date(ticket.purchaseTime * 1000).toLocaleString('zh-CN')}</p>
+                    {ticket.projectSettled && (
+                      <p className="ticket-settled">
+                        项目已结算 {ticket.winningOption === ticket.optionIndex ? '（您持有获胜选项）' : '（未中奖）'}
+                      </p>
+                    )}
                     {order && (
                       <p className="order-status">
                         已挂单 - 价格: {web3.utils.fromWei(order.price, 'ether')} ETH
@@ -215,10 +361,10 @@ const MyTickets: React.FC = () => {
                             setSelectedTicket(ticket.tokenId);
                             handleListTicket();
                           }}
-                          disabled={loading}
+                          disabled={loading || ticket.projectSettled}
                           className="sell-btn"
                         >
-                          挂单出售
+                          {ticket.projectSettled ? '已结算' : '挂单出售'}
                         </button>
                       </div>
                     ) : (
